@@ -1,0 +1,98 @@
+services:
+    monosec-nginx:
+      container_name: monosec-nginx
+      restart: unless-stopped
+      image: nginx:1.27
+      volumes:
+        - ./:/var/www
+        - ./images/nginx/default.conf:/etc/nginx/conf.d/custom.conf
+        - ./images/nginx/laravel.conf:/etc/nginx/laravel.conf
+        #- ./images/nginx/.htpasswd:/etc/nginx/.htpasswd
+      ports:
+        - "80"
+      depends_on:
+        - monosec-php
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
+      networks:
+        - nginx-proxy
+        - monosec-network
+      environment:
+        - VIRTUAL_HOST=${DOMAIN_HOSTS}
+        - SELF_SIGNED_HOST=${DOMAIN_HOSTS}
+        - VIRTUAL_PORT=80
+        - LETSENCRYPT_HOST=${DOMAIN_HOSTS}
+        - LETSENCRYPT_EMAIL=${DOMAIN_EMAIL}
+
+    monosec-php:
+      container_name: monosec-php
+      restart: unless-stopped
+      user: ${USER_ID}:${GROUP_ID}
+      build:
+        dockerfile: Dockerfile
+        context: images/php/8.4
+        args:
+          - USER_ID=${USER_ID}
+          - GROUP_ID=${GROUP_ID}
+      volumes:
+        - ./:/var/www
+        - ./images/php/8.4/conf/php.ini:/usr/local/etc/php/conf.d/php.ini
+        - ./images/php/8.4/conf/supervisord.conf:/etc/supervisor/conf.d/supervisord.conf
+      tmpfs:
+        - /dev/shm
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
+      networks:
+        - mail-catcher-network
+        - monosec-network
+
+    monosec-redis:
+      container_name: monosec-redis
+      image: valkey/valkey:8.1-alpine
+      restart: unless-stopped
+      ports:
+        - "6379"
+      networks:
+        - monosec-network
+      volumes:
+        - redisdata:/data
+
+    monosec-db:
+      container_name: monosec-db
+      image: mariadb:11.4
+      restart: unless-stopped
+      command:
+        --max_allowed_packet=64M
+        --optimizer_use_condition_selectivity=1
+        --optimizer_switch="rowid_filter=off"
+        --innodb_buffer_pool_size=4G
+        --innodb_log_buffer_size=256M
+        --innodb_log_file_size=1G
+        --innodb_write_io_threads=16
+      environment:
+        MYSQL_HOST: "${DB_HOST}"
+        MYSQL_DATABASE: "${DB_DATABASE}"
+        MYSQL_USER: "${DB_USERNAME}"
+        MYSQL_PASSWORD: "${DB_PASSWORD}"
+        MYSQL_ROOT_PASSWORD: "${DB_ROOT_PASSWORD}"
+      ports:
+        - "3306"
+      volumes:
+        - dbdata:/var/lib/mysql
+      networks:
+        - shared-db-network
+        - monosec-network
+
+
+volumes:
+  dbdata:
+  redisdata:
+
+networks:
+  nginx-proxy:
+    external: true
+  shared-db-network:
+    external: true
+  monosec-network:
+  mail-catcher-network:
+    external: true
